@@ -1,0 +1,8 @@
+CREATE TABLE submissions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  firstname VARCHAR(100),
+  lastname VARCHAR(100),
+  email VARCHAR(255),
+  ref VARCHAR(255),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+); 
