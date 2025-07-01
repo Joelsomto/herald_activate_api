@@ -11,7 +11,7 @@
    ```sql
    CREATE DATABASE IF NOT EXISTS herald_activate;
    USE herald_activate;
-   CREATE TABLE submissions (
+   CREATE TABLE herald_activate (
      id INT AUTO_INCREMENT PRIMARY KEY,
      firstname VARCHAR(100),
      lastname VARCHAR(100),

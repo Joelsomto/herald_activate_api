@@ -26,7 +26,7 @@ app.post('/submit', async (req, res) => {
     await db.promise().query('SELECT 1');
     
     await db.promise().execute(
-      'INSERT INTO submissions (firstname, lastname, email, ref) VALUES (?, ?, ?, ?)',
+      'INSERT INTO herald_activate (firstname, lastname, email, ref) VALUES (?, ?, ?, ?)',
       [Firstname, Lastname, Email, ref]
     );
     

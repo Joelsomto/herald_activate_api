@@ -1,4 +1,4 @@
-CREATE TABLE submissions (
+CREATE TABLE herald_activate (
   id INT AUTO_INCREMENT PRIMARY KEY,
   firstname VARCHAR(100),
   lastname VARCHAR(100),
