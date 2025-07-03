@@ -15,6 +15,18 @@ function generateReferral(firstname, lastname) {
   );
 }
 
+// Utility to generate a unique 9-character alphanumeric referral code
+function generateUniqueRef(firstname, lastname, email) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let base = (firstname + lastname + email).replace(/[^A-Za-z0-9]/g, '');
+  base = base.substring(0, 5);
+  let ref = base;
+  while (ref.length < 9) {
+    ref += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return ref.substring(0, 9);
+}
+
 app.post('/submit', async (req, res) => {
   const { Firstname, Lastname, Email } = req.body;
   if (!Firstname || !Lastname || !Email) {
@@ -27,7 +39,7 @@ app.post('/submit', async (req, res) => {
     
     await db.promise().execute(
       'INSERT INTO herald_activate (firstname, lastname, email, ref) VALUES (?, ?, ?, ?)',
-      [Firstname, Lastname, Email, ref]
+      [firstname, lastname, email, ref]
     );
     
     // Send success email using Gmail SMTP
@@ -98,6 +110,121 @@ app.post('/submit', async (req, res) => {
   } catch (err) {
     console.error('Error in /submit:', err);
     res.status(500).json({ error: 'Database or email error', details: err.message });
+  }
+});
+
+app.post('/herald-activate', async (req, res) => {
+  const { firstname, lastname, email } = req.body;
+  if (!firstname || !lastname || !email) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  try {
+    // 1. Check if email exists in subscribers
+    const [subs] = await db.promise().execute(
+      'SELECT subscriberId FROM subscribers WHERE email = ?',
+      [email]
+    );
+    if (subs.length > 0) {
+      // Existing user
+      const subscriberId = subs[0].subscriberId;
+      // 2. Check if subscriberId exists as vc_managerId in virtual_centre_ref
+      const [vcRefs] = await db.promise().execute(
+        'SELECT vc_refId FROM virtual_centre_ref WHERE vc_managerId = ?',
+        [subscriberId]
+      );
+      if (vcRefs.length > 0) {
+        // 3. Update herald column to 1
+        await db.promise().execute(
+          'UPDATE subscribers SET herald = 1 WHERE subscriberId = ?',
+          [subscriberId]
+        );
+        // 4. Send email
+        try {
+          let transporter = nodemailer.createTransport({
+            service: 'gmail',
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            auth: {
+              user: process.env.SMTP_USER,
+              pass: process.env.SMTP_PASS,
+            },
+            tls: { rejectUnauthorized: false }
+          });
+          await transporter.sendMail({
+            from: `"Herald" <${process.env.SMTP_USER}>`,
+            to: email,
+            subject: 'Herald Account Activated',
+            text: `Hello ${firstname} ${lastname},\n\nYour herald account has been activated.\n\nThank you!`,
+            html: `<p>Hello <b>${firstname} ${lastname}</b>,<br>Your herald account has been activated.<br>Thank you!</p>`
+          });
+        } catch (emailError) {
+          console.error('Email sending failed:', emailError);
+        }
+        return res.json({ message: 'Thank you for activating your herald account.' });
+      } else {
+        // Not a herald, but exists as subscriber
+        return res.status(400).json({ error: 'User exists but is not a herald.' });
+      }
+    } else {
+      // New user: use transaction
+      const conn = await db.promise().getConnection();
+      try {
+        await conn.beginTransaction();
+        // Insert into subscribers (herald = 2)
+        const [result] = await conn.execute(
+          'INSERT INTO subscribers (firstname, lastname, email, herald) VALUES (?, ?, ?, 2)',
+          [firstname, lastname, email]
+        );
+        const subscriberId = result.insertId;
+        // Generate unique ref (ensure not already in use)
+        let ref, refExists;
+        do {
+          ref = generateUniqueRef(firstname, lastname, email);
+          const [rows] = await conn.execute('SELECT 1 FROM virtual_centre_ref WHERE ref = ?', [ref]);
+          refExists = rows.length > 0;
+        } while (refExists);
+        // Insert into virtual_centre_ref
+        await conn.execute(
+          'INSERT INTO virtual_centre_ref (vc_managerId, ref, zoneId, familyId) VALUES (?, ?, 98, 98)',
+          [subscriberId, ref]
+        );
+        await conn.commit();
+        // Send email
+        try {
+          let transporter = nodemailer.createTransport({
+            service: 'gmail',
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            auth: {
+              user: process.env.SMTP_USER,
+              pass: process.env.SMTP_PASS,
+            },
+            tls: { rejectUnauthorized: false }
+          });
+          await transporter.sendMail({
+            from: `"Herald" <${process.env.SMTP_USER}>`,
+            to: email,
+            subject: 'Herald Account Created and Activated',
+            text: `Hello ${firstname} ${lastname},\n\nYour herald account has been created and activated.\nReferral code: ${ref}\n\nThank you!`,
+            html: `<p>Hello <b>${firstname} ${lastname}</b>,<br>Your herald account has been created and activated.<br><b>Referral code:</b> ${ref}<br>Thank you!</p>`
+          });
+        } catch (emailError) {
+          console.error('Email sending failed:', emailError);
+        }
+        return res.json({ message: 'Your herald account has been successfully created and activated. Thank you.' });
+      } catch (err) {
+        await conn.rollback();
+        console.error('Transaction error:', err);
+        return res.status(500).json({ error: 'Database error', details: err.message });
+      } finally {
+        conn.release();
+      }
+    }
+  } catch (err) {
+    console.error('Error in /herald-activate:', err);
+    return res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
 
